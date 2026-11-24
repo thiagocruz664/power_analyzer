@@ -1,333 +1,229 @@
-# ARCHITECTURE.md
+# Power Analyzer — Architecture
 
-## 1. Objetivo del sistema
+## 1. System Overview
 
-Power Analyzer es una aplicación de escritorio desarrollada en Python y PySide6, compatible con Windows y Linux, destinada a recibir, procesar y visualizar mediciones provenientes de instrumentos de medición eléctrica.
+Power Analyzer is a cross-platform desktop application developed in Python and PySide6 for monitoring, recording, and managing electrical measurements from power analyzer instruments.
 
-La arquitectura debe permitir incorporar distintos modelos de instrumentos sin obligar a que compartan protocolos de comunicación, estructuras de datos, servicios de adquisición o funcionalidades de interfaz.
+The application follows a modular architecture designed to support different instrument models, each with its own communication mechanisms, measurement protocols, data structures, and specific functionality.
 
-Cada modelo tendrá una integración independiente, mientras que la aplicación mantendrá una estructura común para gestionar los dispositivos configurados y organizar la interfaz.
+The TES3600 is currently the first integrated instrument. Future integrations should not depend on its internal implementation.
 
-El primer instrumento integrado es el TES3600. La arquitectura debe permitir incorporar otros modelos en el futuro sin modificar innecesariamente las integraciones existentes.
+## 2. Architectural Principles
 
-## 2. Principios de diseño
+The architecture follows four main principles:
 
-### 2.1. Independencia entre modelos
+- **Instrument independence:** Each instrument can implement its own communication, acquisition, decoding, and measurement structures.
+- **Separation of responsibilities:** Device management, communication, data processing, persistence, and graphical presentation remain independent.
+- **Transport independence:** TCP is not mandatory for every instrument. Each integration can use the communication mechanism it requires.
+- **Progressive extensibility:** New integrations should reuse existing components when appropriate without introducing unnecessary abstractions.
 
-Cada modelo de instrumento tendrá su propio directorio dentro de `app/`.
+## 3. High-Level Architecture
 
-La integración de cada modelo será responsable de sus particularidades, incluyendo:
+The application is organized into four main areas:
 
-- Configuración de comunicación.
-- Conexión y desconexión.
-- Protocolo de transporte y formato de mensajes.
-- Validación de tramas.
-- Decodificación de datos.
-- Estructuras de medición.
-- Servicios de adquisición.
-- Funcionalidades específicas del instrumento.
+1. **Application:** Startup, main window, navigation, and general coordination.
+2. **Device Management:** Device configuration, identification, and persistence.
+3. **Instrument Integrations:** Communication, acquisition, decoding, and instrument-specific functionality.
+4. **Graphical Interface:** Shared components and device-specific workspaces.
 
-No se debe asumir que todos los instrumentos utilizan TCP, transmiten mensajes de longitud variable, tienen las mismas magnitudes o requieren las mismas operaciones de adquisición.
+### General Data Flow
 
-### 2.2. Separación entre transporte y decodificación
+```text
+      Physical Instrument
+              |
+              v
+     Communication Layer
+              |
+              v
+     Acquisition Services
+              |
+              v
+      Instrument Decoder
+              |
+              v
+      Measurement Data
+              |
+              v
+       Device Widgets
+              |
+       +------+------+
+       |             |
+       v             v
+   Real-Time      Recording
+   Monitoring     and History
+```
 
-La recepción de mensajes y la interpretación de las tramas son responsabilidades diferentes.
+The actual implementation may vary depending on the instrument.
 
-El protocolo de comunicación de un modelo define cómo se reciben y validan los mensajes transmitidos. El decodificador interpreta los bytes correspondientes a la trama del instrumento y obtiene sus mediciones.
+## 4. Device Management
 
-Por ejemplo, en la integración actual del TES3600, el mensaje recibido contiene una longitud, una marca temporal y la trama original del instrumento. El protocolo separa estos componentes y el decodificador interpreta la trama TES3600.
+Located in `app/device_manager/`.
 
-Estas responsabilidades no deben mezclarse.
+This module manages configured devices and their associated information.
 
-### 2.3. Independencia de la interfaz
+Its main components include:
 
-La interfaz gráfica no debe implementar protocolos de comunicación ni decodificar tramas.
+- **Device:** Represents a configured instrument, including its model, connection type, and communication parameters.
+- **DeviceRepository:** Handles device persistence using a local JSON file.
 
-Los widgets reciben los datos procesados por los servicios correspondientes y se encargan de representarlos.
+Device configuration is independent of measurement data and instrument-specific decoding.
 
-Las funcionalidades específicas de un modelo se ubican en sus propios widgets. Las funcionalidades globales de la aplicación permanecen separadas.
+## 5. Instrument Integrations
 
-### 2.4. Extensibilidad sin abstracciones innecesarias
+Each instrument integration contains the components required to operate a specific model.
 
-No se deben crear capas comunes, clases abstractas o interfaces genéricas sin una necesidad concreta.
+The current implementation is located in:
 
-Los componentes específicos de un modelo deben permanecer dentro de su integración. La lógica común de gestión de dispositivos debe limitarse a las responsabilidades que realmente comparten todos los modelos.
+`app/tes3600/`
 
-La arquitectura debe favorecer la reutilización cuando sea útil, sin obligar a instrumentos diferentes a utilizar la misma implementación interna.
+It includes:
 
-## 3. Arquitectura general
+- Communication and network clients.
+- Connection and acquisition services.
+- Protocol handling.
+- Measurement decoding.
+- Instrument-specific measurement data.
 
-La aplicación se organiza en tres áreas principales:
+### TES3600 Acquisition
 
-1. **Gestión de dispositivos:** mantiene los modelos compatibles, los dispositivos configurados y la información necesaria para seleccionarlos.
-2. **Integraciones de instrumentos:** contienen la lógica específica de cada modelo, desde la comunicación hasta la representación de sus mediciones.
-3. **Interfaz gráfica:** proporciona la ventana principal, la navegación, los diálogos globales y los widgets específicos de cada instrumento.
+The TES3600 uses a remote acquisition architecture.
 
-Flujo conceptual de adquisición:
+The instrument is connected to an ODROID-C2 running an independent acquisition server:
 
-    Instrumento de medición
-            ↓
-    Transporte y protocolo del modelo
-            ↓
-    Servicio de conexión y adquisición
-            ↓
-    Decodificador específico del modelo
-            ↓
-    Estructuras de medición del modelo
-            ↓
-    Widgets de visualización
+[tes3600_server](https://github.com/thiagocruz664/tes3600_server)
 
-Este flujo representa la separación de responsabilidades. Su implementación concreta puede variar según las características del instrumento.
+Power Analyzer communicates with this server through TCP.
 
-## 4. Organización de directorios
+Two independent communication channels are currently used:
 
-La estructura objetivo es la siguiente:
+| Channel | Default Port | Purpose |
+|---|---:|---|
+| Real-time acquisition | 5000 | Continuous measurement reception |
+| Historical data | 9001 | Historical measurement queries |
 
-    power_analyzer/
-    ├── app/
-    │   ├── main.py
-    │   │
-    │   ├── device_manager/
-    │   │   ├── device.py
-    │   │   ├── device_registry.py
-    │   │   └── device_repository.py
-    │   │
-    │   ├── tes3600/
-    │   │   ├── __init__.py
-    │   │   ├── device.py
-    │   │   ├── config.py
-    │   │   ├── services/
-    │   │   │   ├── connection_service.py
-    │   │   │   └── measurement_service.py
-    │   │   ├── network/
-    │   │   │   ├── tcp_client.py
-    │   │   │   ├── protocol.py
-    │   │   │   └── transport_factory.py
-    │   │   ├── decoder.py
-    │   │   └── models/
-    │   │       └── measurement.py
-    │   │
-    │   └── ui/
-    │       ├── __init__.py
-    │       ├── main_window.py
-    │       ├── navigation.py
-    │       └── widgets/
-    │           ├── common/
-    │           │   ├── new_device_dialog.py
-    │           │   ├── select_device_dialog.py
-    │           │   └── device_configuration.py
-    │           ├── shared/
-    │           │   └── ...
-    │           └── tes3600/
-    │               ├── real_time_measurement.py
-    │               ├── register_measurement.py
-    │               └── ...
-    │
-    ├── assets/
-    │   └── icons/
-    ├── tests/
-    │   ├── device_manager/
-    │   └── tes3600/
-    ├── requirements.txt
-    └── README.md
+A VPN connection is required between the desktop computer and the remote acquisition server.
 
-La estructura muestra la organización objetivo. Los directorios y archivos se incorporarán cuando corresponda según la implementación real. No deben crearse archivos vacíos ni duplicar módulos únicamente para completar el árbol.
+Tailscale is the recommended solution to simplify connectivity and avoid common endpoint and routing configuration problems.
 
-Cuando se incorpore otro instrumento, su integración tendrá un directorio propio dentro de `app/`, al mismo nivel que `tes3600/`.
+### Communication and Decoding
 
-Por ejemplo:
+The communication layer handles message reception, framing, timestamps, and transport validation.
 
-    app/
-    ├── tes3600/
-    ├── otro_modelo/
-    └── ui/
-        └── widgets/
-            ├── tes3600/
-            └── otro_modelo/
+The instrument decoder interprets the original measurement frames and converts them into structured electrical data.
 
-## 5. Responsabilidades de los componentes
+These responsibilities must remain independent.
 
-### 5.1. Aplicación principal
+## 6. Measurement Management
 
-**`app/main.py`**
+The application handles real-time measurements and historical records through separate workflows.
 
-Punto de entrada de la aplicación. Inicializa Qt y crea la ventana principal.
+### Real-Time Acquisition
 
-No debe contener lógica de comunicación con instrumentos ni decodificación de tramas.
+Measurement services receive data, decode instrument frames, and distribute processed measurements through Qt signals.
 
-### 5.2. Gestión de dispositivos
+This allows acquisition and network operations to run in background threads without blocking the graphical interface.
 
-**`app/device_manager/device.py`**
+### Historical Data
 
-Representa la información general de un dispositivo configurado, como su identificador, nombre asignado y referencia a la configuración correspondiente.
+The TES3600 integration provides a separate TCP client and service for retrieving historical measurements.
 
-No debe contener la lógica interna de comunicación ni las estructuras de medición específicas de un instrumento.
+Users can select predefined or custom time intervals and choose between two download destinations:
 
-**`app/device_manager/device_registry.py`**
+- Internal Power Analyzer recording.
+- Local files.
 
-Mantiene el registro de las integraciones de modelos que la aplicación tiene implementadas y puede utilizar.
+Both destinations can be selected simultaneously.
 
-No debe ofrecer modelos que no estén disponibles en el código.
+Supported export formats include CSV, XLSX, TXT, and PDF.
 
-**`app/device_manager/device_repository.py`**
+Measurement ordering must remain consistent across recording, historical retrieval, and export operations.
 
-Gestiona la persistencia de los dispositivos configurados, utilizando el mecanismo de almacenamiento establecido por la aplicación.
+Currently, device configurations are persisted in JSON, while measurement recordings are maintained in memory during the application session.
 
-La información persistida debe permitir identificar el modelo de cada dispositivo y recuperar su configuración.
+## 7. Graphical Interface
 
-El registro de modelos y el repositorio de dispositivos son responsabilidades diferentes: el primero identifica las integraciones disponibles; el segundo administra las instancias configuradas por el usuario.
+Located in `app/ui/`.
 
-### 5.3. Integración de cada modelo
+The interface is developed with PySide6 and provides the main application window, navigation, device management, and measurement workspaces.
 
-Cada directorio de modelo contiene la lógica necesaria para trabajar con un instrumento concreto.
+### Main Window
 
-**`device.py`**
+`MainWindow` coordinates:
 
-Punto de entrada de la integración. Expone las operaciones necesarias para que la aplicación gestione el dispositivo y conozca las funcionalidades que ofrece.
+- Application navigation.
+- Device selection and configuration.
+- Connection management.
+- Measurement distribution.
+- Workspace and tab management.
 
-**`config.py`**
+It also supports detachable tabs that can be opened in independent windows.
 
-Contiene los parámetros propios del modelo, incluyendo los valores de comunicación y las constantes de protocolo que correspondan.
+### Dynamic Tool Discovery
 
-**`services/connection_service.py`**
+`ToolDiscoveryService` discovers available instrument-specific tools.
 
-Gestiona la conexión y desconexión del instrumento, así como su estado y los errores asociados.
+The `DeviceToolWidget` base class defines a common interaction contract between the main window and device workspaces.
 
-**`services/measurement_service.py`**
+This allows tools to receive measurements and acquisition events without implementing communication logic themselves.
 
-Coordina la adquisición de datos, la validación y decodificación que corresponda, y la entrega de las mediciones a los componentes consumidores.
+### Widgets
 
-**`network/tcp_client.py`**
+The interface distinguishes between:
 
-Implementa el cliente TCP cuando el modelo utiliza este transporte. Gestiona las operaciones de conexión, recepción y cierre.
+- **Common widgets:** Shared device management and configuration components.
+- **Device-specific widgets:** Instrument-dependent measurement and recording workspaces.
 
-Si otro instrumento utiliza una comunicación diferente, su integración puede implementar el mecanismo apropiado sin depender de este cliente.
+Current TES3600 workspaces include real-time measurement, recording, and historical downloads.
 
-**`network/protocol.py`**
+Dynamic tool discovery is implemented, but this does not yet represent a complete plugin or instrument integration system.
 
-Define cómo interpretar los mensajes transmitidos por el sistema de comunicación del modelo: longitud, cabeceras, marcas temporales, delimitadores y demás campos del transporte, según corresponda.
+## 8. Extensibility
 
-No debe interpretar las magnitudes eléctricas de la trama del instrumento.
+The architecture is designed to support additional power analyzer models.
 
-**`network/transport_factory.py`**
+A new integration should provide its own:
 
-Cuando sea necesaria, selecciona o construye la implementación de transporte que corresponda a la configuración del modelo.
+1. Device configuration.
+2. Communication mechanism.
+3. Protocol implementation.
+4. Measurement decoder.
+5. Measurement data structures.
+6. Acquisition services.
+7. Device-specific graphical tools.
 
-No debe convertirse en una fábrica global que presuponga que todos los instrumentos comparten el mismo transporte.
+Existing integrations should remain independent.
 
-**`decoder.py`**
+Although device management and graphical tool discovery already provide reusable mechanisms, acquisition and decoding are still coupled to the TES3600 in parts of the current implementation.
 
-Interpreta las tramas del instrumento y extrae sus mediciones. Contiene las validaciones propias del formato de datos del modelo.
+Future development should progressively remove this coupling without introducing unnecessary architectural complexity.
 
-No debe depender de widgets ni de elementos de la interfaz gráfica.
+## 9. Project Guidelines
 
-**`models/measurement.py`**
+The following guidelines should be maintained during development:
 
-Define las estructuras de medición específicas del instrumento cuando estas sean necesarias.
+- Keep instrument-specific logic within its integration.
+- Separate communication protocols from measurement decoding.
+- Keep graphical components independent of transport implementations.
+- Avoid blocking the main Qt thread.
+- Use Qt signals for communication between background services and the interface.
+- Maintain consistent measurement ordering.
+- Avoid circular dependencies and unnecessary abstractions.
+- Preserve existing instrument functionality when introducing new integrations.
 
-Cada modelo puede tener sus propias magnitudes, unidades, metadatos y estructuras de datos. No se exige que todos los instrumentos compartan un único modelo rígido de medición.
+## 10. Current Scope
 
-### 5.4. Interfaz gráfica
+The current implementation provides:
 
-**`ui/main_window.py`**
+- Device registration and configuration.
+- JSON-based device persistence.
+- TES3600 TCP acquisition.
+- Serial communication components for the TES3600.
+- Measurement decoding and real-time visualization.
+- Measurement recording and historical retrieval.
+- CSV, XLSX, TXT, and PDF exports.
+- Dynamic graphical tool discovery.
+- Tab and independent window management.
 
-Administra la ventana principal, la disposición general de la interfaz y la integración de los componentes de navegación y visualización.
+Direct serial acquisition is not yet integrated into the main device connection workflow.
 
-No debe implementar protocolos de comunicación ni lógica de decodificación.
-
-**`ui/navigation.py`**
-
-Coordina la navegación de la aplicación y la selección de funcionalidades disponibles para el dispositivo activo.
-
-Debe separar las funciones globales de las funciones específicas de cada modelo.
-
-**`ui/widgets/common/`**
-
-Contiene los diálogos y componentes globales, como el alta de dispositivos, la selección de dispositivos y la configuración general de sus conexiones.
-
-Estos componentes deben permitir trabajar con los modelos registrados sin asumir que todos requieren los mismos parámetros.
-
-**`ui/widgets/shared/`**
-
-Contiene widgets reutilizables por distintos modelos cuando exista una necesidad real de compartirlos.
-
-**`ui/widgets/<modelo>/`**
-
-Contiene las vistas y herramientas específicas de cada instrumento.
-
-En el TES3600, esto puede incluir medición en tiempo real, registro, FFT y análisis, de acuerdo con las funcionalidades efectivamente implementadas.
-
-Los widgets deben consumir los servicios y las estructuras de datos del modelo correspondiente, sin implementar la adquisición por su cuenta.
-
-### 5.5. Recursos y pruebas
-
-**`assets/`**
-
-Contiene iconos y demás recursos gráficos utilizados por la aplicación.
-
-**`tests/`**
-
-Organiza las pruebas por área funcional, manteniendo separadas las pruebas de gestión de dispositivos y las pruebas específicas de cada instrumento.
-
-Las pruebas deben cubrir las responsabilidades implementadas sin depender innecesariamente de equipos físicos o conexiones reales.
-
-## 6. Navegación según el dispositivo seleccionado
-
-La navegación debe adaptarse al dispositivo activo.
-
-Se distinguen tres grupos de funcionalidades:
-
-1. **Globales:** administración de dispositivos, preferencias y configuración general.
-2. **Compartidas:** herramientas que pueden utilizarse con distintos modelos cuando sus requisitos estén satisfechos.
-3. **Específicas:** herramientas que dependen de las capacidades de un instrumento concreto.
-
-Cada integración debe poder informar qué funcionalidades admite. La navegación utilizará esa información para mostrar las opciones correspondientes.
-
-La disponibilidad de una herramienta no debe determinarse únicamente por el nombre del modelo ni mediante una lista creciente de condiciones específicas dentro de `main_window.py`.
-
-La interfaz no debe mostrar funcionalidades que no estén implementadas o que requieran datos que el dispositivo no proporciona.
-
-La gestión de las pestañas abiertas es una responsabilidad de la interfaz y debe mantenerse separada de la selección de funcionalidades en el menú lateral.
-
-## 7. Incorporación de nuevos modelos
-
-Para incorporar un nuevo instrumento se debe:
-
-1. Crear su directorio dentro de `app/`.
-2. Implementar la configuración y los mecanismos de comunicación correspondientes.
-3. Implementar su protocolo y decodificador.
-4. Definir sus estructuras de medición cuando sean necesarias.
-5. Exponer el punto de entrada de la integración y sus funcionalidades disponibles.
-6. Incorporar el modelo al registro de integraciones.
-7. Añadir los widgets específicos que correspondan.
-8. Implementar pruebas para sus protocolos, decodificación y servicios.
-
-La integración de un modelo nuevo no debe requerir modificar el decodificador, los servicios internos o las estructuras de medición de los modelos existentes.
-
-Solo se modificarán los componentes globales cuando sea necesario incorporar explícitamente el nuevo modelo al registro o ampliar una capacidad común de la aplicación.
-
-## 8. Reglas de implementación
-
-- Mantener las dependencias entre módulos explícitas.
-- Evitar importaciones circulares.
-- Mantener la lógica de comunicación fuera de la interfaz gráfica.
-- Mantener los decodificadores independientes de los widgets.
-- No asumir que todos los instrumentos usan TCP.
-- No asumir que todas las tramas tienen el mismo tamaño o estructura.
-- No imponer las mismas magnitudes ni estructuras de medición a todos los modelos.
-- No introducir abstracciones genéricas sin una necesidad concreta.
-- No duplicar código común cuando exista una oportunidad real y comprobada de reutilización.
-- No modificar el comportamiento existente durante una reestructuración exclusivamente arquitectónica.
-- Mantener las dependencias externas documentadas en `requirements.txt`.
-
-## 9. Alcance actual
-
-El modelo implementado es el TES3600.
-
-La aplicación recibe mensajes mediante TCP, interpreta el formato de transporte, extrae la marca temporal y la trama original, decodifica los datos del instrumento y los entrega a los componentes de visualización.
-
-La integración debe conservar el comportamiento actual durante las reorganizaciones internas.
-
-La incorporación de nuevos modelos, la ampliación de funcionalidades de navegación y la creación de nuevas herramientas de medición se realizarán en etapas posteriores.
-
-Este documento define la arquitectura objetivo y sirve como referencia para las modificaciones estructurales futuras.
+The architecture will continue evolving as additional instruments and shared capabilities are introduced.
