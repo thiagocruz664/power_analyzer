@@ -88,6 +88,27 @@ class TES3600Decoder:
         else:
             thetat = 0
         
+        if len(frame) < 59:
+            return None
+
+        signs = frame[58]
+
+        if (signs & 0b11) == 0b10:
+            q1 = -q1
+            theta1 = -theta1
+
+        if (signs & 0b1100) == 0b1000:
+            q2 = -q2
+            theta2 = -theta2
+
+        if (signs & 0b110000) == 0b100000:
+            q3 = -q3
+            theta3 = -theta3
+
+        if q1 + q2 + q3 < 0:
+            qt = -qt
+            thetat = -thetat
+        
         return {
             "V1": v1,"I1": i1,"kVA1": s1,"kW1": p1,"FP1": fp1,"kVAR1": q1,"Theta1": theta1,
             "V2": v2,"I2": i2,"kVA2": s2,"kW2": p2,"FP2": fp2,"kVAR2": q2,"Theta2": theta2,
