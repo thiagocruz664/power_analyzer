@@ -21,6 +21,24 @@ logger = logging.getLogger("PowerAnalyzer.HistoryService")
 # Con el intervalo mínimo de 500 ms, las ventanas no se superponen.
 SAMPLE_TOLERANCE_MS = 250
 
+CANONICAL_HEADERS = [
+    "V1", "I1", "kVA1", "kW1", "FP1", "kVAR1", "Theta1",
+    "V2", "I2", "kVA2", "kW2", "FP2", "kVAR2", "Theta2",
+    "V3", "I3", "kVA3", "kW3", "FP3", "kVAR3", "Theta3",
+    "TkVA", "TkW", "TFP", "TkVAR", "TTheta1", "Hz", "I4",
+]
+
+
+def order_headers_like_history(headers: list[str]) -> list[str]:
+    """Ordena los encabezados siguiendo el orden canónico de historial (V1, I1, ...).
+
+    Cualquier encabezado desconocido o adicional se mantiene al final.
+    """
+    header_set = set(headers)
+    ordered = [h for h in CANONICAL_HEADERS if h in header_set]
+    remaining = [h for h in headers if h not in ordered]
+    return ordered + remaining
+
 
 def estimate_sample_interval(samples: list[list[Any]]) -> float:
     """Estima el intervalo predominante entre las marcas temporales seleccionadas."""
@@ -66,7 +84,7 @@ def select_samples_by_interval(
         return []
     if interval_ms < 500 or interval_ms > 3_600_000:
         raise ValueError("El intervalo de muestreo debe estar entre 500 ms y 1 hora.")
-    if tolerance_ms < 0 or tolerance_ms * 2 >= interval_ms:
+    if tolerance_ms < 0 or tolerance_ms * 2 > interval_ms:
         raise ValueError("La tolerancia debe ser positiva y menor que la mitad del intervalo.")
 
     # La secuencia del servidor debe ser cronológica para que el filtrado sea determinista.
@@ -208,7 +226,7 @@ class HistoryDownloadWorker(QThread):
                         ui_measurements[dst] = ui_measurements.pop(src)
 
                 if not headers:
-                    headers = list(ui_measurements.keys())
+                    headers = order_headers_like_history(list(ui_measurements.keys()))
 
                 dt = datetime.fromtimestamp(timestamp_ms / 1000.0)
                 iso_timestamp = dt.isoformat(sep=" ", timespec="milliseconds")
@@ -256,7 +274,9 @@ class HistoryDownloadWorker(QThread):
                 else self.sample_interval_ms / 1000.0
             )
 
-            if self.destination_mode == "internal":
+            if self.destination_mode == "both":
+                self.status_updated.emit("Creando registro en Power Analyzer y exportando archivo...")
+            elif self.destination_mode == "internal":
                 self.status_updated.emit("Creando registro en Power Analyzer...")
             else:
                 self.status_updated.emit("Exportando archivo local...")

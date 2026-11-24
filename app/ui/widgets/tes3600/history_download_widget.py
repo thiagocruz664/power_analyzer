@@ -9,6 +9,7 @@ from typing import Any
 from PySide6.QtCore import QDate, QTime, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QFileDialog,
@@ -50,6 +51,102 @@ PERIOD_OPTIONS = [
 
 DESTINATION_INTERNAL = "Guardar en Power Analyzer (registro interno)"
 DESTINATION_LOCAL = "Descargar en archivo local"
+
+CALENDAR_POPUP_STYLE = """
+    QWidget#qt_datetimedit_calendar {
+        background-color: #FFFFFF;
+        border: 1px solid #CBD5E1;
+        border-radius: 8px;
+    }
+    QCalendarWidget {
+        background-color: #FFFFFF;
+        border: 1px solid #CBD5E1;
+        border-radius: 8px;
+        font-family: "Segoe UI";
+    }
+    QCalendarWidget QWidget#qt_calendar_navigationbar {
+        background-color: #F8FAFC;
+        border-bottom: 1px solid #E2E8F0;
+        border-top-left-radius: 8px;
+        border-top-right-radius: 8px;
+        min-height: 34px;
+    }
+    QCalendarWidget QToolButton {
+        color: #1E293B;
+        background-color: transparent;
+        font-family: "Segoe UI";
+        font-size: 9.5pt;
+        font-weight: 600;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        padding: 4px 8px;
+        margin: 2px;
+    }
+    QCalendarWidget QToolButton:hover {
+        background-color: #E2E8F0;
+        border-color: #CBD5E1;
+        color: #0F172A;
+    }
+    QCalendarWidget QToolButton:pressed {
+        background-color: #CBD5E1;
+    }
+    QCalendarWidget QMenu {
+        background-color: #FFFFFF;
+        color: #1E293B;
+        border: 1px solid #CBD5E1;
+        border-radius: 6px;
+        padding: 4px;
+    }
+    QCalendarWidget QMenu::item:selected {
+        background-color: #E0F2FE;
+        color: #0369A1;
+    }
+    QCalendarWidget QSpinBox#qt_calendar_yearedit {
+        background-color: #FFFFFF;
+        color: #1E293B;
+        border: 1px solid #CBD5E1;
+        border-radius: 4px;
+        padding: 2px 4px;
+        font-size: 9.5pt;
+        selection-background-color: #E0F2FE;
+        selection-color: #0369A1;
+    }
+    QCalendarWidget QTableView#qt_calendar_calendarview {
+        background-color: #FFFFFF;
+        alternate-background-color: #FFFFFF;
+        color: #1E293B;
+        border: none;
+        gridline-color: #F1F5F9;
+        selection-background-color: #0284C7;
+        selection-color: #FFFFFF;
+        font-family: "Segoe UI";
+        font-size: 9pt;
+        outline: none;
+    }
+    QCalendarWidget QTableView#qt_calendar_calendarview::item:hover {
+        background-color: #E0F2FE;
+        color: #0369A1;
+        border-radius: 4px;
+    }
+    QCalendarWidget QTableView#qt_calendar_calendarview::item:selected {
+        background-color: #0284C7;
+        color: #FFFFFF;
+        font-weight: 600;
+        border-radius: 4px;
+    }
+    QCalendarWidget QAbstractItemView:disabled {
+        color: #94A3B8;
+    }
+    QCalendarWidget QHeaderView::section {
+        background-color: #F8FAFC;
+        color: #475569;
+        font-family: "Segoe UI";
+        font-weight: 600;
+        font-size: 8.5pt;
+        border: none;
+        border-bottom: 1px solid #E2E8F0;
+    }
+"""
 
 DOWNLOAD_WIDGET_STYLE = """
     QWidget#history_download_page {
@@ -181,7 +278,43 @@ DOWNLOAD_WIDGET_STYLE = """
         background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #059669, stop:1 #10B981);
         border-radius: 5px;
     }
+
+    QCheckBox {
+        color: #1E293B;
+        font-size: 9.5pt;
+        font-weight: 500;
+        spacing: 8px;
+    }
+    QCheckBox:disabled {
+        color: #94A3B8;
+    }
 """
+
+
+class DestinationComboCompat:
+    """Adaptador de compatibilidad para código y pruebas existentes que acceden a destination_combo."""
+
+    def __init__(self, widget: HistoryDownloadWidget) -> None:
+        self._widget = widget
+
+    def setCurrentText(self, text: str) -> None:
+        if text == DESTINATION_LOCAL:
+            self._widget.chk_internal.setChecked(False)
+            self._widget.chk_file.setChecked(True)
+        elif text == DESTINATION_INTERNAL:
+            self._widget.chk_internal.setChecked(True)
+            self._widget.chk_file.setChecked(False)
+
+    def currentText(self) -> str:
+        if self._widget.chk_internal.isChecked() and self._widget.chk_file.isChecked():
+            return "Ambos"
+        if self._widget.chk_file.isChecked():
+            return DESTINATION_LOCAL
+        return DESTINATION_INTERNAL
+
+    def setEnabled(self, enabled: bool) -> None:
+        self._widget.chk_internal.setEnabled(enabled)
+        self._widget.chk_file.setEnabled(enabled)
 
 
 def _create_download_icon_pixmap() -> QIcon:
@@ -287,6 +420,11 @@ class HistoryDownloadWidget(QWidget):
         self.start_date_edit.setCalendarPopup(True)
         self.start_date_edit.setDisplayFormat("dd-MM-yyyy")
         self.start_date_edit.setDate(QDate(start_default.year, start_default.month, start_default.day))
+        cal_start = self.start_date_edit.calendarWidget()
+        if cal_start:
+            cal_start.setStyleSheet(CALENDAR_POPUP_STYLE)
+            if cal_start.parent():
+                cal_start.parent().setStyleSheet(CALENDAR_POPUP_STYLE)
 
         self.start_time_edit = QTimeEdit()
         self.start_time_edit.setDisplayFormat("HH:mm:ss")
@@ -299,6 +437,11 @@ class HistoryDownloadWidget(QWidget):
         self.end_date_edit.setCalendarPopup(True)
         self.end_date_edit.setDisplayFormat("dd-MM-yyyy")
         self.end_date_edit.setDate(QDate(now.year, now.month, now.day))
+        cal_end = self.end_date_edit.calendarWidget()
+        if cal_end:
+            cal_end.setStyleSheet(CALENDAR_POPUP_STYLE)
+            if cal_end.parent():
+                cal_end.parent().setStyleSheet(CALENDAR_POPUP_STYLE)
 
         self.end_time_edit = QTimeEdit()
         self.end_time_edit.setDisplayFormat("HH:mm:ss")
@@ -368,15 +511,28 @@ class HistoryDownloadWidget(QWidget):
         name_lbl.setObjectName("form_label")
         form.addRow(name_lbl, self.name_input)
 
-        # 2.4 Destino de la descarga mediante menú selector
-        self.destination_combo = QComboBox()
-        self.destination_combo.addItem(DESTINATION_INTERNAL)
-        self.destination_combo.addItem(DESTINATION_LOCAL)
-        self.destination_combo.currentIndexChanged.connect(self._update_destination_ui)
+        # 2.4 Destino de la descarga mediante casillas de selección
+        dest_container = QWidget()
+        dest_layout = QVBoxLayout(dest_container)
+        dest_layout.setContentsMargins(0, 2, 0, 2)
+        dest_layout.setSpacing(6)
+
+        self.chk_internal = QCheckBox("Guardar en el registro local (Power Analyzer)")
+        self.chk_internal.setChecked(True)
+        self.chk_internal.toggled.connect(self._update_destination_ui)
+
+        self.chk_file = QCheckBox("Descargar como archivo")
+        self.chk_file.setChecked(False)
+        self.chk_file.toggled.connect(self._update_destination_ui)
+
+        self.destination_combo = DestinationComboCompat(self)
+
+        dest_layout.addWidget(self.chk_internal)
+        dest_layout.addWidget(self.chk_file)
 
         dest_lbl = QLabel("Destino:")
         dest_lbl.setObjectName("form_label")
-        form.addRow(dest_lbl, self.destination_combo)
+        form.addRow(dest_lbl, dest_container)
 
         # 2.5 Controles para archivo local
         self.local_file_container = QWidget()
@@ -460,9 +616,8 @@ class HistoryDownloadWidget(QWidget):
         self.custom_container.setVisible(is_custom)
 
     def _update_destination_ui(self) -> None:
-        """Habilita la selección de ruta y formato al elegir descarga en archivo local."""
-        is_local = self.destination_combo.currentText() == DESTINATION_LOCAL
-        self.local_file_container.setVisible(is_local)
+        """Habilita la selección de ruta y formato al marcar descarga en archivo."""
+        self.local_file_container.setVisible(self.chk_file.isChecked())
 
     def _on_format_changed(self) -> None:
         """Actualiza la extensión en la ruta si ya se seleccionó una."""
@@ -527,8 +682,17 @@ class HistoryDownloadWidget(QWidget):
             self.name_input.setFocus()
             return False
 
+        # Validación de casillas de destino
+        if not self.chk_internal.isChecked() and not self.chk_file.isChecked():
+            QMessageBox.warning(
+                self,
+                "Destino requerido",
+                "Seleccioná al menos un destino para las mediciones (registro local o archivo).",
+            )
+            return False
+
         # Validación de destino local
-        if self.destination_combo.currentText() == DESTINATION_LOCAL:
+        if self.chk_file.isChecked():
             path_str = self.path_input.text().strip()
             if not path_str:
                 QMessageBox.warning(
@@ -600,12 +764,18 @@ class HistoryDownloadWidget(QWidget):
             return
 
         name = self.name_input.text().strip()
-        is_local = self.destination_combo.currentText() == DESTINATION_LOCAL
-        destination_mode = "local_file" if is_local else "internal"
+        is_internal = self.chk_internal.isChecked()
+        is_file = self.chk_file.isChecked()
+        if is_internal and is_file:
+            destination_mode = "both"
+        elif is_file:
+            destination_mode = "local_file"
+        else:
+            destination_mode = "internal"
 
-        export_path = Path(self.path_input.text().strip()) if is_local else None
+        export_path = Path(self.path_input.text().strip()) if is_file else None
         export_extension = None
-        if is_local:
+        if is_file:
             selected_fmt = self.format_combo.currentText()
             export_extension = EXPORT_FORMATS[selected_fmt][0]
 
@@ -662,7 +832,8 @@ class HistoryDownloadWidget(QWidget):
         """Habilita o deshabilita controles durante la descarga."""
         self.period_combo.setEnabled(enabled)
         self.name_input.setEnabled(enabled)
-        self.destination_combo.setEnabled(enabled)
+        self.chk_internal.setEnabled(enabled)
+        self.chk_file.setEnabled(enabled)
         self.format_combo.setEnabled(enabled)
         self.browse_button.setEnabled(enabled)
         self.start_date_edit.setEnabled(enabled)

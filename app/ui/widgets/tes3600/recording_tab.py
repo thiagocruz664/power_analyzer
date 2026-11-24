@@ -102,6 +102,24 @@ IMPORT_FILE_FILTER = (
 )
 FILE_FORMAT_VERSION = "PowerAnalyzerRecording/1"
 
+CANONICAL_HEADERS = [
+    "V1", "I1", "kVA1", "kW1", "FP1", "kVAR1", "Theta1",
+    "V2", "I2", "kVA2", "kW2", "FP2", "kVAR2", "Theta2",
+    "V3", "I3", "kVA3", "kW3", "FP3", "kVAR3", "Theta3",
+    "TkVA", "TkW", "TFP", "TkVAR", "TTheta1", "Hz", "I4",
+]
+
+
+def order_headers_like_history(headers: list[str]) -> list[str]:
+    """Ordena los encabezados siguiendo el orden canónico de historial (V1, I1, ...).
+
+    Cualquier encabezado desconocido o adicional se mantiene al final.
+    """
+    header_set = set(headers)
+    ordered = [h for h in CANONICAL_HEADERS if h in header_set]
+    remaining = [h for h in headers if h not in ordered]
+    return ordered + remaining
+
 
 def format_timestamp_display(value: Any) -> str:
     """Formatea una estampa de tiempo o fecha para presentación en formato DD-MM-AAAA.
@@ -1397,12 +1415,13 @@ class RecordingTab(DeviceToolWidget):
         if not self.active_recording_ids():
             return
         timestamp = datetime.now()
+        ordered_headers = order_headers_like_history(list(measurements.keys()))
         for record_id in self.active_recording_ids():
             self.add_sample(
                 record_id=record_id,
                 timestamp=timestamp,
                 values=measurements,
-                headers=list(measurements.keys()),
+                headers=ordered_headers,
             )
 
     def on_acquisition_status_changed(self, status: str) -> None:
@@ -1489,11 +1508,15 @@ class RecordingTab(DeviceToolWidget):
             self._close_download_tab()
             return
 
-        if destination_mode == "internal":
+        save_internal = destination_mode in ("internal", "both")
+        save_file = destination_mode in ("local_file", "both")
+
+        recording_created = None
+        if save_internal:
             record_id = self._next_id
             self._next_id += 1
 
-            recording = Recording(
+            recording_created = Recording(
                 record_id=record_id,
                 name=name,
                 started_at=result.get("started_at", datetime.now()),
@@ -1505,18 +1528,11 @@ class RecordingTab(DeviceToolWidget):
                 samples=samples,
                 monotonic_start=time.monotonic(),
             )
-            self._recordings[record_id] = recording
+            self._recordings[record_id] = recording_created
             self._refresh_table()
             self.table.selectRow(self.table.rowCount() - 1)
-            self._close_download_tab()
 
-            QMessageBox.information(
-                self,
-                "Descarga completada",
-                f"Se recibieron e incorporaron {len(samples):,} mediciones al nuevo registro «{name}» de Power Analyzer.",
-            )
-
-        elif destination_mode == "local_file":
+        if save_file:
             export_path = result.get("export_path")
             export_extension = result.get("export_extension")
             if not export_path or not export_extension:
@@ -1527,7 +1543,7 @@ class RecordingTab(DeviceToolWidget):
                 )
                 return
 
-            temp_recording = Recording(
+            rec_for_export = recording_created if recording_created is not None else Recording(
                 record_id=0,
                 name=name,
                 started_at=result.get("started_at", datetime.now()),
@@ -1541,7 +1557,7 @@ class RecordingTab(DeviceToolWidget):
             )
 
             try:
-                self._write_recording_file(temp_recording, Path(export_path), export_extension)
+                self._write_recording_file(rec_for_export, Path(export_path), export_extension)
             except Exception as exc:
                 QMessageBox.critical(
                     self,
@@ -1550,11 +1566,27 @@ class RecordingTab(DeviceToolWidget):
                 )
                 return
 
-            self._close_download_tab()
+        self._close_download_tab()
+
+        if save_internal and save_file:
             QMessageBox.information(
                 self,
                 "Descarga completada",
-                f"Se descargaron {len(samples):,} mediciones y se exportaron exitosamente a:\n{export_path}",
+                f"Se descargaron {len(samples):,} mediciones:\n\n"
+                f"• Se incorporaron al registro interno «{name}» de Power Analyzer.\n"
+                f"• Se exportaron exitosamente a:\n{result.get('export_path')}",
+            )
+        elif save_internal:
+            QMessageBox.information(
+                self,
+                "Descarga completada",
+                f"Se recibieron e incorporaron {len(samples):,} mediciones al nuevo registro «{name}» de Power Analyzer.",
+            )
+        elif save_file:
+            QMessageBox.information(
+                self,
+                "Descarga completada",
+                f"Se descargaron {len(samples):,} mediciones y se exportaron exitosamente a:\n{result.get('export_path')}",
             )
 
     def add_sample(
@@ -1590,8 +1622,8 @@ class RecordingTab(DeviceToolWidget):
             timestamp_text = normalize_to_iso_timestamp(timestamp)
 
         if isinstance(values, dict):
-            incoming_headers = list(values.keys())
-            incoming_values = list(values.values())
+            incoming_headers = order_headers_like_history(list(values.keys()))
+            incoming_values = [values.get(h, "") for h in incoming_headers]
         else:
             incoming_values = list(values)
             incoming_headers = list(headers or [
